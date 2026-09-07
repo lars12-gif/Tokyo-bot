@@ -19,6 +19,7 @@ st.title("👑 TOKYO Work System - WhatsApp Bot")
 
 PAIR_CODE_FILE = "pair_code.txt"
 LINKED_FLAG_FILE = "linked.flag"
+RATE_LIMIT_FILE = "rate_limit.flag"
 VERSION_FILE = "session_version.txt"
 
 def get_session_name():
@@ -33,11 +34,11 @@ def get_session_name():
 SESSION_NAME = get_session_name()
 
 # ---------------------------------------------------------
-# زر التحكم الجانبي لإعادة الضبط وبدء جلسة جديدة
+# زر التحكم الجانبي
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ لوحة التحكم")
-    st.write("إذا سجلت خروج أو أردت ربط حساب جديد، اضغط الزر أدناه:")
+    st.write("إذا سجلت خروج أو أردت بداية جلسة جديدة، اضغط الزر أدناه:")
     if st.button("🔴 إعادة ضبط وبدء جلسة جديدة"):
         current_ver = 1
         if os.path.exists(VERSION_FILE):
@@ -51,7 +52,7 @@ with st.sidebar:
         with open(VERSION_FILE, "w") as f:
             f.write(str(new_ver))
         
-        for f in [PAIR_CODE_FILE, LINKED_FLAG_FILE]:
+        for f in [PAIR_CODE_FILE, LINKED_FLAG_FILE, RATE_LIMIT_FILE]:
             if os.path.exists(f):
                 try:
                     os.remove(f)
@@ -187,9 +188,10 @@ def start_bot_singleton(sess_name):
 
     @client.event(ConnectedEv)
     def on_connected(_: NewClient, __: ConnectedEv):
-        # يكتب هذا الملف فقط إذا اكتمل الربط بنجاح بالواتساب
         with open(LINKED_FLAG_FILE, "w") as f:
             f.write("true")
+        if os.path.exists(RATE_LIMIT_FILE):
+            os.remove(RATE_LIMIT_FILE)
         print(f"\n🟢 تم الاتصال بنجاح بالجلسة {sess_name}! البوت أونلاين الآن.")
 
     @client.event(MessageEv)
@@ -235,17 +237,20 @@ def start_bot_singleton(sess_name):
         if not os.path.exists(LINKED_FLAG_FILE):
             phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
             if phone:
-                for attempt in range(5):
-                    try:
-                        print(f"⏳ طلب رمز الربط للجلسة {sess_name} (محاولة {attempt+1})...")
-                        code = client.PairPhone(phone, True)
-                        with open(PAIR_CODE_FILE, "w") as f:
-                            f.write(code)
-                        print(f"🔑 تم توليد الرمز بنجاح: {code}")
-                        break
-                    except Exception as e:
-                        print(f"⚠️ محاولة {attempt+1} فشلت: {e}")
-                        time.sleep(3)
+                try:
+                    print(f"⏳ طلب رمز الربط للجلسة {sess_name}...")
+                    code = client.PairPhone(phone, True)
+                    with open(PAIR_CODE_FILE, "w") as f:
+                        f.write(code)
+                    if os.path.exists(RATE_LIMIT_FILE):
+                        os.remove(RATE_LIMIT_FILE)
+                    print(f"🔑 تم توليد الرمز بنجاح: {code}")
+                except Exception as e:
+                    err_str = str(e)
+                    print(f"⚠️ فشل طلب الرمز: {err_str}")
+                    if "429" in err_str or "rate-overlimit" in err_str:
+                        with open(RATE_LIMIT_FILE, "w") as f:
+                            f.write("429")
 
     def runner():
         threading.Thread(target=pairing_worker, daemon=True).start()
@@ -267,6 +272,16 @@ start_bot_singleton(SESSION_NAME)
 if os.path.exists(LINKED_FLAG_FILE):
     st.success(f"🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!** (`{SESSION_NAME}`)")
     st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب ($فحص ، $انفو ، $اوامر).")
+
+elif os.path.exists(RATE_LIMIT_FILE):
+    st.error("🚨 **سيرفرات واتساب فرضت حظراً مؤقتاً (Rate Limit 429) لكثرة المحاولات!**")
+    st.warning("""
+    📌 **ماذا يجب أن تفعل الآن؟**
+    * توقف عن الضغط على زر التحديث أو زر إعادة الضبط.
+    * انتظر من **20 إلى 30 دقيقة** حتى يفك سيرفر واتساب الحظر التلقائي عن الرقم.
+    * بعد انقضاء الوقت، اضغط على زر **`🔴 إعادة ضبط وبدء جلسة جديدة`** من القائمة الجانبية وسيُطلب الرمز بنجاح.
+    """)
+
 else:
     st.subheader("🔑 ربط الواتساب بـ رمز الهاتف (Pairing Code)")
     st.caption(f"الجلسة الحالية: `{SESSION_NAME}`")
