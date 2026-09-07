@@ -1,3 +1,4 @@
 streamlit
 supabase
 neonize
+python-magic-bin
