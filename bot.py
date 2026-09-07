@@ -9,16 +9,30 @@ from supabase import create_client, Client
 from neonize.client import NewClient
 from neonize.events import MessageEv, ConnectedEv
 
-st.set_page_config(page_title="TOKYO Bot", page_icon="👑")
-st.title("👑 TOKYO Work System - WhatsApp Bot")
-st.success("🟢 سيرفر البوت شغال أونلاين!")
+# إخفاء رسائل الـ QR والسجلات المزعجة
+logging.getLogger("neonize").setLevel(logging.ERROR)
 
+# ---------------------------------------------------------
+# 1. إعداد واجهة Streamlit
+# ---------------------------------------------------------
+st.set_page_config(page_title="TOKYO Work System", page_icon="👑", layout="centered")
+
+st.title("👑 TOKYO Work System - WhatsApp Bot")
+
+PAIR_CODE_FILE = "pair_code.txt"
+
+# ---------------------------------------------------------
+# 2. إعدادات قاعدة البيانات Supabase
+# ---------------------------------------------------------
 SUPABASE_URL = "https://igskxyazuomofeqvkwcy.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlnc2t4eWF6dW9tb2ZlcXZrd2N5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNTkyNTksImV4cCI6MjEwMTczNTI1OX0.HadeqymBYWETFaauKYFNtlD-ahg3GfoOGoH0XKu_mWg"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 FOOTER_CREDITS = "\n\n👑 *TOKYO Work System © 2026*\n⚡ *Developed By Aurther*"
 
+# ---------------------------------------------------------
+# 3. دوال البحث والتحقق من الألقاب
+# ---------------------------------------------------------
 def normalize_arabic(text: str) -> str:
     if not text:
         return ""
@@ -122,8 +136,11 @@ def cmd_info(query_text: str) -> str:
     )
     return msg + FOOTER_CREDITS
 
-if "bot_running" not in st.session_state:
-    st.session_state.bot_running = True
+# ---------------------------------------------------------
+# 4. إعداد وتشغيل البوت في الخلفية
+# ---------------------------------------------------------
+if "bot_started" not in st.session_state:
+    st.session_state.bot_started = True
     client = NewClient("tokyo_bot_session")
 
     @client.event(ConnectedEv)
@@ -161,17 +178,46 @@ if "bot_running" not in st.session_state:
             client.reply_message(reply, message)
 
     def run_bot():
-        time.sleep(3)
+        time.sleep(2)
         if not os.path.exists("tokyo_bot_session.sqlite"):
             phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
             if phone:
                 try:
                     code = client.PairPhone(phone, True)
-                    print("\n" + "="*50)
-                    print(f"  🔑🔑 رمز الربط الخاص بك هو:   {code}   🔑🔑")
-                    print("="*50 + "\n")
+                    with open(PAIR_CODE_FILE, "w") as f:
+                        f.write(code)
+                    print(f"🔑 رمز الربط: {code}")
                 except Exception as e:
-                    print(f"⚠️ جاري طلب الرمز: {e}")
+                    print(f"⚠️ خطأ أثناء طلب رمز الربط: {e}")
         client.connect()
 
     threading.Thread(target=run_bot, daemon=True).start()
+
+# ---------------------------------------------------------
+# 5. عرض الرمز بوجهة موقع Streamlit للمستخدم مباشرة
+# ---------------------------------------------------------
+if os.path.exists("tokyo_bot_session.sqlite"):
+    st.success("🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!**")
+    st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب (.فحص ، .انفو ، .اوامر).")
+else:
+    st.subheader("🔑 ربط الواتساب بـ رمز الهاتف (Pairing Code)")
+    
+    if os.path.exists(PAIR_CODE_FILE):
+        with open(PAIR_CODE_FILE, "r") as f:
+            pair_code = f.read().strip()
+        
+        if pair_code:
+            st.success("🎉 **تم توليد رمز الربط بنجاح!**")
+            st.markdown("انسخ الرمز الظاهر أدناه وافتحه بالواتساب:")
+            st.code(pair_code, language="text")
+            st.info("""
+            📌 **طريقة الربط بالواتساب:**
+            1. افتح الواتساب بتليفونك 📱.
+            2. ادخل إلى **الأجهزة المرتبطة** 👈 **ربط جهاز**.
+            3. اضغط على **الربط باستخدام رقم الهاتف بدلاً من ذلك**.
+            4. اكتب الرمز المكتوب في الصندوق أعلاه.
+            """)
+    else:
+        st.warning("⏳ جاري توليد رمز الربط من السيرفر، انتظر ثواني واضغط الزر بأسفله...")
+        if st.button("🔄 تحديث الصفحة لرؤية الرمز"):
+            st.rerun()
