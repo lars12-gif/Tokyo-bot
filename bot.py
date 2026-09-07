@@ -21,6 +21,24 @@ PAIR_CODE_FILE = "pair_code.txt"
 SESSION_PREFIX = "tokyo_bot_session"
 
 # ---------------------------------------------------------
+# زر التحكم الدائم بمسح الجلسة (في القائمة الجانبية Sidebar)
+# ---------------------------------------------------------
+with st.sidebar:
+    st.header("⚙️ لوحة التحكم")
+    st.write("إذا ظهر لك خطأ بالربط أو سجلت خروج، اضغط الزر أدناه لمسح البيانات ورؤية رمز جديد:")
+    if st.button("🔴 إعادة ضبط ورؤية رمز جديد"):
+        for f in glob.glob(f"{SESSION_PREFIX}*") + [PAIR_CODE_FILE]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+        st.cache_resource.clear()
+        st.success("تم المسح بنجاح! جاري التحديث...")
+        time.sleep(2)
+        st.rerun()
+
+# ---------------------------------------------------------
 # 1. إعدادات قاعدة البيانات Supabase
 # ---------------------------------------------------------
 SUPABASE_URL = "https://igskxyazuomofeqvkwcy.supabase.co"
@@ -136,7 +154,7 @@ def cmd_info(query_text: str) -> str:
     return msg + FOOTER_CREDITS
 
 # ---------------------------------------------------------
-# 3. إعداد الكلاينت وتشغيل البوت بـ Singleton عبر Cache
+# 3. تشغيل الكلاينت مع محاولات إعادة طلب الرمز تلقائياً
 # ---------------------------------------------------------
 @st.cache_resource
 def start_bot_singleton():
@@ -185,20 +203,23 @@ def start_bot_singleton():
             client.reply_message(reply, message)
 
     def pairing_worker():
-        # الانتظار 5 ثوانٍ لضمان تجهيز محرك الاتصال
-        time.sleep(5)
-        has_session = any(os.path.exists(f) for f in glob.glob(f"{SESSION_PREFIX}.sqlite*"))
-        if not has_session:
+        # الانتظار 6 ثوانٍ لضمان استقرار محرك الاتصال لتجنب خطأ client is nil
+        time.sleep(6)
+        sqlite_files = [f for f in glob.glob(f"{SESSION_PREFIX}*") if not f.endswith(".txt")]
+        if not sqlite_files:
             phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
             if phone:
-                try:
-                    print(f"⏳ جاري طلب رمز الربط للرقم: {phone}")
-                    code = client.PairPhone(phone, True)
-                    with open(PAIR_CODE_FILE, "w") as f:
-                        f.write(code)
-                    print(f"🔑 تم توليد الرمز بنجاح: {code}")
-                except Exception as e:
-                    print(f"❌ خطأ أثناء طلب رمز الربط: {e}")
+                for attempt in range(5):
+                    try:
+                        print(f"⏳ محاولة طلب رمز الربط ({attempt+1})...")
+                        code = client.PairPhone(phone, True)
+                        with open(PAIR_CODE_FILE, "w") as f:
+                            f.write(code)
+                        print(f"🔑 تم توليد الرمز بنجاح: {code}")
+                        break
+                    except Exception as e:
+                        print(f"⚠️ محاولة {attempt+1} فشلت: {e}")
+                        time.sleep(3)
 
     def runner():
         threading.Thread(target=pairing_worker, daemon=True).start()
@@ -211,32 +232,17 @@ def start_bot_singleton():
     thread.start()
     return True
 
-# تشغيل البوت مرة واحدة فقط
+# تشغيل البوت
 start_bot_singleton()
 
 # ---------------------------------------------------------
-# 4. واجهة التحكم بالصفحة
+# 4. الشاشة الرئيسية للمستخدم
 # ---------------------------------------------------------
-has_active_session = any(os.path.exists(f) for f in glob.glob(f"{SESSION_PREFIX}.sqlite*"))
+sqlite_files = [f for f in glob.glob(f"{SESSION_PREFIX}*") if not f.endswith(".txt")]
 
-if has_active_session:
+if sqlite_files and not os.path.exists(PAIR_CODE_FILE):
     st.success("🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!**")
     st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب ($فحص ، $انفو ، $اوامر).")
-    
-    st.divider()
-    st.caption("⚠️ إذا سجلت خروج وتريد ربط حساب جديد أو إعادة الربط، اضغط الزر أدناه:")
-    if st.button("🔴 إزالة الجلسة القديمة وإعادة الربط"):
-        for f in glob.glob(f"{SESSION_PREFIX}.sqlite*") + [PAIR_CODE_FILE]:
-            if os.path.exists(f):
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
-        st.cache_resource.clear()
-        st.success("تم مسح الجلسة القديمة! جاري إعادة التشغيل...")
-        time.sleep(2)
-        st.rerun()
-
 else:
     st.subheader("🔑 ربط الواتساب بـ رمز الهاتف (Pairing Code)")
     
