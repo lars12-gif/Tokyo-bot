@@ -1,22 +1,24 @@
+import streamlit as st
 import re
 import difflib
 import os
+import time
+import threading
+import logging
 from supabase import create_client, Client
 from neonize.client import NewClient
 from neonize.events import MessageEv, ConnectedEv
 
-# ---------------------------------------------------------
-# 1. إعدادات قاعدة البيانات (TOKYO Work System)
-# ---------------------------------------------------------
+st.set_page_config(page_title="TOKYO Bot", page_icon="👑")
+st.title("👑 TOKYO Work System - WhatsApp Bot")
+st.success("🟢 سيرفر البوت شغال أونلاين!")
+
 SUPABASE_URL = "https://igskxyazuomofeqvkwcy.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlnc2t4eWF6dW9tb2ZlcXZrd2N5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNTkyNTksImV4cCI6MjEwMTczNTI1OX0.HadeqymBYWETFaauKYFNtlD-ahg3GfoOGoH0XKu_mWg"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 FOOTER_CREDITS = "\n\n👑 *TOKYO Work System © 2026*\n⚡ *Developed By Aurther*"
 
-# ---------------------------------------------------------
-# 2. دوال المعالجة وتطبيع النصوص والأوامر
-# ---------------------------------------------------------
 def normalize_arabic(text: str) -> str:
     if not text:
         return ""
@@ -120,58 +122,56 @@ def cmd_info(query_text: str) -> str:
     )
     return msg + FOOTER_CREDITS
 
-# ---------------------------------------------------------
-# 3. إعداد واستقبال رسائل الواتساب
-# ---------------------------------------------------------
-client = NewClient("tokyo_bot_session")
+if "bot_running" not in st.session_state:
+    st.session_state.bot_running = True
+    client = NewClient("tokyo_bot_session")
 
-@client.event(ConnectedEv)
-def on_connected(_: NewClient, __: ConnectedEv):
-    print("\n🟢 تم الاتصال بالواتساب بنجاح! بوت TOKYO شغال وجاهز لاستلام الأوامر.")
+    @client.event(ConnectedEv)
+    def on_connected(_: NewClient, __: ConnectedEv):
+        print("\n🟢 تم الاتصال بنجاح! البوت أونلاين الآن وشغال بالجروب.")
 
-@client.event(MessageEv)
-def on_message(client: NewClient, message: MessageEv):
-    msg_text = message.message.conversation or message.message.extendedTextMessage.text or ""
-    msg_text = msg_text.strip()
+    @client.event(MessageEv)
+    def on_message(client: NewClient, message: MessageEv):
+        msg_text = message.message.conversation or message.message.extendedTextMessage.text or ""
+        msg_text = msg_text.strip()
 
-    if not msg_text.startswith("."):
-        return
+        if not msg_text.startswith("."):
+            return
 
-    parts = msg_text.split(" ", 1)
-    command = parts[0].lower()
-    args = parts[1].strip() if len(parts) > 1 else ""
+        parts = msg_text.split(" ", 1)
+        command = parts[0].lower()
+        args = parts[1].strip() if len(parts) > 1 else ""
 
-    if command == ".فحص":
-        reply = cmd_check(args)
-        client.reply_message(reply, message)
-        
-    elif command == ".انفو":
-        reply = cmd_info(args)
-        client.reply_message(reply, message)
+        if command == ".فحص":
+            reply = cmd_check(args)
+            client.reply_message(reply, message)
+        elif command == ".انفو":
+            reply = cmd_info(args)
+            client.reply_message(reply, message)
+        elif command in [".الاوامر", ".اوامر"]:
+            reply = (
+                f"👑 *قائمة أوامر بوت TOKYO Work System*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔹 `.فحص [اللقب]` : تفحص توفر اللقب وتمنع التكرار.\n"
+                f"🔹 `.انفو [اللقب أو الرقم]` : كافة معلومات العضو.\n"
+                f"🔹 `.اوامر` : لعرض هذه القائمة.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━"
+                f"{FOOTER_CREDITS}"
+            )
+            client.reply_message(reply, message)
 
-    elif command in [".الاوامر", ".اوامر"]:
-        reply = (
-            f"👑 *قائمة أوامر بوت TOKYO Work System*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔹 `.فحص [اللقب]` : تفحص توفر اللقب وتمنع التكرار والتشابه.\n"
-            f"🔹 `.انفو [اللقب أو الرقم]` : تعطي كافة معلومات العضو.\n"
-            f"🔹 `.اوامر` : لعرض هذه القائمة.\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━"
-            f"{FOOTER_CREDITS}"
-        )
-        client.reply_message(reply, message)
+    def run_bot():
+        time.sleep(3)
+        if not os.path.exists("tokyo_bot_session.sqlite"):
+            phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
+            if phone:
+                try:
+                    code = client.PairPhone(phone, True)
+                    print("\n" + "="*50)
+                    print(f"  🔑🔑 رمز الربط الخاص بك هو:   {code}   🔑🔑")
+                    print("="*50 + "\n")
+                except Exception as e:
+                    print(f"⚠️ جاري طلب الرمز: {e}")
+        client.connect()
 
-# ---------------------------------------------------------
-# الربط بـ رمز الهاتف (Pairing Code)
-# ---------------------------------------------------------
-if not os.path.exists("tokyo_bot_session.sqlite"):
-    phone_number = input("📱 أدخل رقم هاتف البوت مع فتح الخط الدولي (مثلاً 9647XXXXXXXX): ").strip()
-    phone_number = phone_number.replace("+", "").replace(" ", "").replace("-", "")
-    print("⏳ جاري طلب رمز الربط...")
-    pair_code = client.pair_code(phone_number)
-    print("\n" + "═" * 40)
-    print(f"🔑 رمز الربط الخاص بك:  {pair_code}")
-    print("═" * 40)
-    print("📌 اذهب إلى تطبيق الواتساب 👈 الأجهزة المرتبطة 👈 ربط جهاز 👈 اختر 'الربط باستخدام رقم الهاتف بدلاً من ذلك' وادخل الرمز أعلاه.\n")
-
-client.connect()
+    threading.Thread(target=run_bot, daemon=True).start()
