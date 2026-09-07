@@ -2,6 +2,7 @@ import streamlit as st
 import re
 import difflib
 import os
+import glob
 import time
 import threading
 import logging
@@ -12,17 +13,15 @@ from neonize.events import MessageEv, ConnectedEv
 # إخفاء رسائل الـ QR والسجلات المزعجة
 logging.getLogger("neonize").setLevel(logging.ERROR)
 
-# ---------------------------------------------------------
-# 1. إعداد واجهة Streamlit
-# ---------------------------------------------------------
 st.set_page_config(page_title="TOKYO Work System", page_icon="👑", layout="centered")
 
 st.title("👑 TOKYO Work System - WhatsApp Bot")
 
 PAIR_CODE_FILE = "pair_code.txt"
+SESSION_PREFIX = "tokyo_bot_session"
 
 # ---------------------------------------------------------
-# 2. إعدادات قاعدة البيانات Supabase
+# 1. إعدادات قاعدة البيانات Supabase
 # ---------------------------------------------------------
 SUPABASE_URL = "https://igskxyazuomofeqvkwcy.supabase.co"
 SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlnc2t4eWF6dW9tb2ZlcXZrd2N5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNTkyNTksImV4cCI6MjEwMTczNTI1OX0.HadeqymBYWETFaauKYFNtlD-ahg3GfoOGoH0XKu_mWg"
@@ -31,7 +30,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 FOOTER_CREDITS = "\n\n👑 *TOKYO Work System © 2026*\n⚡ *Developed By Aurther*"
 
 # ---------------------------------------------------------
-# 3. دوال البحث والتحقق من الألقاب
+# 2. دوال البحث والتحقق من الألقاب
 # ---------------------------------------------------------
 def normalize_arabic(text: str) -> str:
     if not text:
@@ -137,11 +136,11 @@ def cmd_info(query_text: str) -> str:
     return msg + FOOTER_CREDITS
 
 # ---------------------------------------------------------
-# 4. إعداد وتشغيل البوت في الخلفية
+# 3. إعداد الكلاينت وتشغيل البوت بـ Singleton عبر Cache
 # ---------------------------------------------------------
-if "bot_started" not in st.session_state:
-    st.session_state.bot_started = True
-    client = NewClient("tokyo_bot_session")
+@st.cache_resource
+def start_bot_singleton():
+    client = NewClient(SESSION_PREFIX)
 
     @client.event(ConnectedEv)
     def on_connected(_: NewClient, __: ConnectedEv):
@@ -149,7 +148,6 @@ if "bot_started" not in st.session_state:
 
     @client.event(MessageEv)
     def on_message(client: NewClient, message: MessageEv):
-        # الفحص الآمن لمنع انهيار البوت عند استقبال وسائط أو ملصقات
         if not message.message:
             return
 
@@ -161,7 +159,6 @@ if "bot_started" not in st.session_state:
 
         msg_text = msg_text.strip()
 
-        # التبديل من . إلى $
         if not msg_text.startswith("$"):
             return
 
@@ -187,28 +184,59 @@ if "bot_started" not in st.session_state:
             )
             client.reply_message(reply, message)
 
-    def run_bot():
-        time.sleep(2)
-        if not os.path.exists("tokyo_bot_session.sqlite"):
+    def pairing_worker():
+        # الانتظار 5 ثوانٍ لضمان تجهيز محرك الاتصال
+        time.sleep(5)
+        has_session = any(os.path.exists(f) for f in glob.glob(f"{SESSION_PREFIX}.sqlite*"))
+        if not has_session:
             phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
             if phone:
                 try:
+                    print(f"⏳ جاري طلب رمز الربط للرقم: {phone}")
                     code = client.PairPhone(phone, True)
                     with open(PAIR_CODE_FILE, "w") as f:
                         f.write(code)
-                    print(f"🔑 رمز الربط: {code}")
+                    print(f"🔑 تم توليد الرمز بنجاح: {code}")
                 except Exception as e:
-                    print(f"⚠️ خطأ أثناء طلب رمز الربط: {e}")
-        client.connect()
+                    print(f"❌ خطأ أثناء طلب رمز الربط: {e}")
 
-    threading.Thread(target=run_bot, daemon=True).start()
+    def runner():
+        threading.Thread(target=pairing_worker, daemon=True).start()
+        try:
+            client.connect()
+        except Exception as e:
+            print(f"❌ خطأ الاتصال: {e}")
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    return True
+
+# تشغيل البوت مرة واحدة فقط
+start_bot_singleton()
 
 # ---------------------------------------------------------
-# 5. عرض الرمز بوجهة موقع Streamlit للمستخدم مباشرة
+# 4. واجهة التحكم بالصفحة
 # ---------------------------------------------------------
-if os.path.exists("tokyo_bot_session.sqlite"):
+has_active_session = any(os.path.exists(f) for f in glob.glob(f"{SESSION_PREFIX}.sqlite*"))
+
+if has_active_session:
     st.success("🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!**")
     st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب ($فحص ، $انفو ، $اوامر).")
+    
+    st.divider()
+    st.caption("⚠️ إذا سجلت خروج وتريد ربط حساب جديد أو إعادة الربط، اضغط الزر أدناه:")
+    if st.button("🔴 إزالة الجلسة القديمة وإعادة الربط"):
+        for f in glob.glob(f"{SESSION_PREFIX}.sqlite*") + [PAIR_CODE_FILE]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+        st.cache_resource.clear()
+        st.success("تم مسح الجلسة القديمة! جاري إعادة التشغيل...")
+        time.sleep(2)
+        st.rerun()
+
 else:
     st.subheader("🔑 ربط الواتساب بـ رمز الهاتف (Pairing Code)")
     
@@ -218,7 +246,7 @@ else:
         
         if pair_code:
             st.success("🎉 **تم توليد رمز الربط بنجاح!**")
-            st.markdown("انسخ الرمز الظاهر أدناه وافتحه بالواتساب:")
+            st.markdown("انسخ الرمز الظاهر أدناه وافتحه بالواتساب فوراً:")
             st.code(pair_code, language="text")
             st.info("""
             📌 **طريقة الربط بالواتساب:**
@@ -228,6 +256,6 @@ else:
             4. اكتب الرمز المكتوب في الصندوق أعلاه.
             """)
     else:
-        st.warning("⏳ جاري توليد رمز الربط من السيرفر، انتظر ثواني واضغط الزر بأسفله...")
+        st.warning("⏳ جاري طلب رمز الربط من السيرفر... انتظر 5 ثوانٍ واضغط زر التحديث.")
         if st.button("🔄 تحديث الصفحة لرؤية الرمز"):
             st.rerun()
