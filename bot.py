@@ -52,7 +52,7 @@ def fetch_all_members():
 
 def cmd_check(query_nick: str) -> str:
     if not query_nick:
-        return "⚠️ *يرجى كتابة اللقب بعد الأمر.* \nمثال: `.فحص ارين`"
+        return "⚠️ *يرجى كتابة اللقب بعد الأمر.* \nمثال: `$فحص ارين`"
     
     members = fetch_all_members()
     if not members:
@@ -105,7 +105,7 @@ def cmd_check(query_nick: str) -> str:
 
 def cmd_info(query_text: str) -> str:
     if not query_text:
-        return "⚠️ *يرجى كتابة اللقب أو الرقم بعد الأمر.* \nمثال: `.انفو ارين`"
+        return "⚠️ *يرجى كتابة اللقب أو الرقم بعد الأمر.* \nمثال: `$انفو ارين`"
 
     members = fetch_all_members()
     if not members:
@@ -149,29 +149,39 @@ if "bot_started" not in st.session_state:
 
     @client.event(MessageEv)
     def on_message(client: NewClient, message: MessageEv):
-        msg_text = message.message.conversation or message.message.extendedTextMessage.text or ""
+        # الفحص الآمن لمنع انهيار البوت عند استقبال وسائط أو ملصقات
+        if not message.message:
+            return
+
+        msg_text = ""
+        if message.message.conversation:
+            msg_text = message.message.conversation
+        elif message.message.extendedTextMessage and message.message.extendedTextMessage.text:
+            msg_text = message.message.extendedTextMessage.text
+
         msg_text = msg_text.strip()
 
-        if not msg_text.startswith("."):
+        # التبديل من . إلى $
+        if not msg_text.startswith("$"):
             return
 
         parts = msg_text.split(" ", 1)
         command = parts[0].lower()
         args = parts[1].strip() if len(parts) > 1 else ""
 
-        if command == ".فحص":
+        if command == "$فحص":
             reply = cmd_check(args)
             client.reply_message(reply, message)
-        elif command == ".انفو":
+        elif command == "$انفو":
             reply = cmd_info(args)
             client.reply_message(reply, message)
-        elif command in [".الاوامر", ".اوامر"]:
+        elif command in ["$الاوامر", "$اوامر"]:
             reply = (
                 f"👑 *قائمة أوامر بوت TOKYO Work System*\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔹 `.فحص [اللقب]` : تفحص توفر اللقب وتمنع التكرار.\n"
-                f"🔹 `.انفو [اللقب أو الرقم]` : كافة معلومات العضو.\n"
-                f"🔹 `.اوامر` : لعرض هذه القائمة.\n"
+                f"🔹 `$فحص [اللقب]` : تفحص توفر اللقب وتمنع التكرار.\n"
+                f"🔹 `$انفو [اللقب أو الرقم]` : كافة معلومات العضو.\n"
+                f"🔹 `$اوامر` : لعرض هذه القائمة.\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━"
                 f"{FOOTER_CREDITS}"
             )
@@ -198,7 +208,7 @@ if "bot_started" not in st.session_state:
 # ---------------------------------------------------------
 if os.path.exists("tokyo_bot_session.sqlite"):
     st.success("🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!**")
-    st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب (.فحص ، .انفو ، .اوامر).")
+    st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب ($فحص ، $انفو ، $اوامر).")
 else:
     st.subheader("🔑 ربط الواتساب بـ رمز الهاتف (Pairing Code)")
     
