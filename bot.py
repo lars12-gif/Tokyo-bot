@@ -10,7 +10,7 @@ from supabase import create_client, Client
 from neonize.client import NewClient
 from neonize.events import MessageEv, ConnectedEv
 
-# إخفاء سجلات النظام المزعجة
+# إخفاء السجلات المزعجة
 logging.getLogger("neonize").setLevel(logging.ERROR)
 
 st.set_page_config(page_title="TOKYO Work System", page_icon="👑", layout="centered")
@@ -105,86 +105,72 @@ def cmd_info(query_text: str) -> str:
     ) + FOOTER_CREDITS
 
 # ---------------------------------------------------------
-# محرك إدارة السوكيت وإعادة الاتصال التلقائي النظيف
+# محرك إعادة الاتصال التلقائي
 # ---------------------------------------------------------
-GLOBAL_CLIENT = None
+def run_whatsapp_client():
+    while True:
+        try:
+            print("⚡ جاري فتح سوكيت مستقر للواتساب...")
+            client = NewClient(SESSION_NAME)
 
-def get_or_create_client():
-    global GLOBAL_CLIENT
-    if GLOBAL_CLIENT is None:
-        GLOBAL_CLIENT = NewClient(SESSION_NAME)
-    return GLOBAL_CLIENT
+            @client.event(ConnectedEv)
+            def on_connected(_: NewClient, __: ConnectedEv):
+                with open(LINKED_FLAG_FILE, "w") as f: f.write("true")
+                print("\n🟢 [ONLINE] البوت متصل وجاهز للاستجابة للأوامر!")
+
+            @client.event(MessageEv)
+            def on_message(client: NewClient, message: MessageEv):
+                try:
+                    if not hasattr(message, "message") or not message.message:
+                        return
+
+                    msg_obj = message.message
+                    msg_text = ""
+
+                    if hasattr(msg_obj, "conversation") and msg_obj.conversation:
+                        msg_text = msg_obj.conversation
+                    elif hasattr(msg_obj, "extendedTextMessage") and msg_obj.extendedTextMessage and hasattr(msg_obj.extendedTextMessage, "text"):
+                        msg_text = msg_obj.extendedTextMessage.text
+
+                    msg_text = msg_text.strip()
+                    if not msg_text or not msg_text.startswith("$"):
+                        return
+
+                    print(f"📩 [أمر جديد]: {msg_text}")
+
+                    parts = msg_text.split(" ", 1)
+                    cmd = parts[0].lower()
+                    args = parts[1].strip() if len(parts) > 1 else ""
+
+                    if cmd == "$فحص":
+                        client.reply_message(cmd_check(args), message)
+                    elif cmd == "$انفو":
+                        client.reply_message(cmd_info(args), message)
+                    elif cmd in ["$الاوامر", "$اوامر"]:
+                        reply = f"👑 *أوامر بوت TOKYO Work System*\n🔹 `$فحص [اللقب]`\n🔹 `$انفو [اللقب/الرقم]`\n🔹 `$اوامر`" + FOOTER_CREDITS
+                        client.reply_message(reply, message)
+                except Exception as e:
+                    print(f"⚠️ خطأ معالجة: {e}")
+
+            client.connect()
+        except Exception as e:
+            print(f"🔄 إعادة الاتصال السريع بعد 3 ثوانٍ...")
+            time.sleep(3)
 
 @st.cache_resource
-def start_persistent_bot():
-    def bot_loop():
-        global GLOBAL_CLIENT
-        while True:
-            try:
-                print("⚡ جاري فتح سوكيت جديد والاتصال بالواتساب...")
-                client = NewClient(SESSION_NAME)
-                GLOBAL_CLIENT = client
-
-                @client.event(ConnectedEv)
-                def on_connected(_: NewClient, __: ConnectedEv):
-                    with open(LINKED_FLAG_FILE, "w") as f: f.write("true")
-                    print("\n🟢 [CONNECTED] السوكيت متصل وجاهز فوراً لاستقبال الأوامر!")
-
-                @client.event(MessageEv)
-                def on_message(client: NewClient, message: MessageEv):
-                    try:
-                        if not hasattr(message, "message") or not message.message:
-                            return
-
-                        msg_obj = message.message
-                        msg_text = ""
-
-                        if hasattr(msg_obj, "conversation") and msg_obj.conversation:
-                            msg_text = msg_obj.conversation
-                        elif hasattr(msg_obj, "extendedTextMessage") and msg_obj.extendedTextMessage and hasattr(msg_obj.extendedTextMessage, "text"):
-                            msg_text = msg_obj.extendedTextMessage.text
-                        elif hasattr(msg_obj, "imageMessage") and msg_obj.imageMessage and hasattr(msg_obj.imageMessage, "caption"):
-                            msg_text = msg_obj.imageMessage.caption
-
-                        msg_text = msg_text.strip()
-                        if not msg_text or not msg_text.startswith("$"):
-                            return
-
-                        print(f"📩 [COMMAND RECEIVED]: {msg_text}")
-
-                        parts = msg_text.split(" ", 1)
-                        cmd = parts[0].lower()
-                        args = parts[1].strip() if len(parts) > 1 else ""
-
-                        if cmd == "$فحص":
-                            client.reply_message(cmd_check(args), message)
-                            print(f"✅ تم الرد على $فحص")
-                        elif cmd == "$انفو":
-                            client.reply_message(cmd_info(args), message)
-                            print(f"✅ تم الرد على $انفو")
-                        elif cmd in ["$الاوامر", "$اوامر"]:
-                            reply = f"👑 *أوامر بوت TOKYO Work System*\n🔹 `$فحص [اللقب]`\n🔹 `$انفو [اللقب/الرقم]`\n🔹 `$اوامر`" + FOOTER_CREDITS
-                            client.reply_message(reply, message)
-                            print(f"✅ تم الرد على $اوامر")
-                    except Exception as e:
-                        print(f"⚠️ خطأ أثناء المعالجة: {e}")
-
-                client.connect()
-            except Exception as e:
-                print(f"⚠️ انقطع السوكيت ({e}) - جاري فتح سوكيت جديد خلال 3 ثوانٍ...")
-                time.sleep(3)
-
-    threading.Thread(target=bot_loop, daemon=True).start()
+def start_runner_thread():
+    t = threading.Thread(target=run_whatsapp_client, daemon=True)
+    t.start()
     return True
 
-start_persistent_bot()
+start_runner_thread()
 
 # ---------------------------------------------------------
 # الواجهة الرئيسية
 # ---------------------------------------------------------
 if os.path.exists(LINKED_FLAG_FILE):
     st.success("🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!**")
-    st.info("جرّب الآن أرسل `$اوامر` بالواتساب وتابع السجلات (Logs).")
+    st.info("جرّب الآن أرسل `$اوامر` بالواتساب.")
 else:
     st.subheader("🔑 ربط الواتساب")
     if os.path.exists(PAIR_CODE_FILE):
@@ -192,12 +178,4 @@ else:
         st.success("🎉 **رمز الربط الحالي:**")
         st.code(pair_code, language="text")
     else:
-        if st.button("⚡ طلب رمز الربط الآن"):
-            phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
-            try:
-                curr_client = get_or_create_client()
-                code = curr_client.PairPhone(phone, True)
-                with open(PAIR_CODE_FILE, "w") as f: f.write(code)
-                st.rerun()
-            except Exception as e:
-                st.error(f"خطأ: {e}")
+        st.warning("إذا لم يظهر الكود تلقائياً، أعد تحميل الصفحة.")
