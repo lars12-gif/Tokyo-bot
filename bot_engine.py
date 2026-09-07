@@ -2,6 +2,7 @@ import re
 import difflib
 import os
 import time
+import threading
 import logging
 from supabase import create_client, Client
 from neonize.client import NewClient
@@ -82,6 +83,20 @@ def cmd_info(query_text: str) -> str:
         f"📅 *تاريخ التسجيل:* {found_member.get('date', 'غير مؤرخ')}\n━━━━━━━━━━━━━━━━━━━━━━"
     ) + FOOTER_CREDITS
 
+def pairing_task(client):
+    time.sleep(5)
+    if not os.path.exists(LINKED_FLAG_FILE):
+        phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
+        if phone:
+            try:
+                print(f"⏳ جاري طلب رمز الربط للرقم: {phone}")
+                code = client.PairPhone(phone, True)
+                with open(PAIR_CODE_FILE, "w") as f:
+                    f.write(code)
+                print(f"🔑 تم كتابة رمز الربط بنجاح: {code}")
+            except Exception as e:
+                print(f"⚠️ خطأ أثناء طلب رمز الربط: {e}")
+
 def start_engine():
     while True:
         try:
@@ -122,15 +137,8 @@ def start_engine():
                 except Exception as e:
                     print(f"⚠️ error: {e}")
 
-            # توليد الكود إذا لم تكن هناك جلسة
-            if not os.path.exists(f"{SESSION_NAME}.sqlite"):
-                phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
-                if phone:
-                    try:
-                        code = client.PairPhone(phone, True)
-                        with open(PAIR_CODE_FILE, "w") as f: f.write(code)
-                    except Exception as e:
-                        print(f"⚠️ Pair code error: {e}")
+            # طلب رمز الربط في الخفاء بعد جاهزية السوكيت
+            threading.Thread(target=pairing_task, args=(client,), daemon=True).start()
 
             client.connect()
         except Exception as e:
