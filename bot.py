@@ -18,23 +18,48 @@ st.set_page_config(page_title="TOKYO Work System", page_icon="👑", layout="cen
 st.title("👑 TOKYO Work System - WhatsApp Bot")
 
 PAIR_CODE_FILE = "pair_code.txt"
-SESSION_PREFIX = "tokyo_bot_session"
+VERSION_FILE = "session_version.txt"
+
+# جلب أو إنشاء رقم إصدار الجلسة الحالي
+def get_session_name():
+    if not os.path.exists(VERSION_FILE):
+        with open(VERSION_FILE, "w") as f:
+            f.write("1")
+        return "tokyo_session_v1"
+    with open(VERSION_FILE, "r") as f:
+        ver = f.read().strip() or "1"
+    return f"tokyo_session_v{ver}"
+
+SESSION_NAME = get_session_name()
 
 # ---------------------------------------------------------
-# زر التحكم الدائم بمسح الجلسة (في القائمة الجانبية Sidebar)
+# زر التحكم الجانبي لإعادة الضبط وتغيير الجلسة فوراً
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ لوحة التحكم")
-    st.write("إذا ظهر لك خطأ بالربط أو سجلت خروج، اضغط الزر أدناه لمسح البيانات ورؤية رمز جديد:")
-    if st.button("🔴 إعادة ضبط ورؤية رمز جديد"):
-        for f in glob.glob(f"{SESSION_PREFIX}*") + [PAIR_CODE_FILE]:
-            if os.path.exists(f):
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
+    st.write("إذا سجلت خروج أو واجهت مشكلة بالربط، اضغط الزر أدناه للبدء بجلسة جديدة تماماً:")
+    if st.button("🔴 إعادة ضبط وبدء جلسة جديدة"):
+        # زيادة رقم الإصدار للانتقال لجلسة جديدة نظيفة
+        current_ver = 1
+        if os.path.exists(VERSION_FILE):
+            try:
+                with open(VERSION_FILE, "r") as f:
+                    current_ver = int(f.read().strip())
+            except Exception:
+                current_ver = 1
+        
+        new_ver = current_ver + 1
+        with open(VERSION_FILE, "w") as f:
+            f.write(str(new_ver))
+        
+        if os.path.exists(PAIR_CODE_FILE):
+            try:
+                os.remove(PAIR_CODE_FILE)
+            except Exception:
+                pass
+                
         st.cache_resource.clear()
-        st.success("تم المسح بنجاح! جاري التحديث...")
+        st.success(f"تم إنشاء جلسة جديدة (v{new_ver})! جاري إعادة التشغيل...")
         time.sleep(2)
         st.rerun()
 
@@ -154,15 +179,15 @@ def cmd_info(query_text: str) -> str:
     return msg + FOOTER_CREDITS
 
 # ---------------------------------------------------------
-# 3. تشغيل الكلاينت مع محاولات إعادة طلب الرمز تلقائياً
+# 3. تشغيل الكلاينت للجلسة الحالية
 # ---------------------------------------------------------
 @st.cache_resource
-def start_bot_singleton():
-    client = NewClient(SESSION_PREFIX)
+def start_bot_singleton(sess_name):
+    client = NewClient(sess_name)
 
     @client.event(ConnectedEv)
     def on_connected(_: NewClient, __: ConnectedEv):
-        print("\n🟢 تم الاتصال بنجاح! البوت أونلاين الآن وشغال بالجروب.")
+        print(f"\n🟢 تم الاتصال بنجاح بالجلسة {sess_name}! البوت أونلاين الآن.")
 
     @client.event(MessageEv)
     def on_message(client: NewClient, message: MessageEv):
@@ -203,15 +228,14 @@ def start_bot_singleton():
             client.reply_message(reply, message)
 
     def pairing_worker():
-        # الانتظار 6 ثوانٍ لضمان استقرار محرك الاتصال لتجنب خطأ client is nil
         time.sleep(6)
-        sqlite_files = [f for f in glob.glob(f"{SESSION_PREFIX}*") if not f.endswith(".txt")]
-        if not sqlite_files:
+        session_files = [f for f in glob.glob(f"{sess_name}*") if not f.endswith(".txt")]
+        if not session_files:
             phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
             if phone:
                 for attempt in range(5):
                     try:
-                        print(f"⏳ محاولة طلب رمز الربط ({attempt+1})...")
+                        print(f"⏳ طلب رمز الربط للجلسة {sess_name} (محاولة {attempt+1})...")
                         code = client.PairPhone(phone, True)
                         with open(PAIR_CODE_FILE, "w") as f:
                             f.write(code)
@@ -232,19 +256,20 @@ def start_bot_singleton():
     thread.start()
     return True
 
-# تشغيل البوت
-start_bot_singleton()
+# تشغيل الجلسة الحالية
+start_bot_singleton(SESSION_NAME)
 
 # ---------------------------------------------------------
-# 4. الشاشة الرئيسية للمستخدم
+# 4. الشاشة الرئيسية
 # ---------------------------------------------------------
-sqlite_files = [f for f in glob.glob(f"{SESSION_PREFIX}*") if not f.endswith(".txt")]
+active_session_files = [f for f in glob.glob(f"{SESSION_NAME}*") if not f.endswith(".txt")]
 
-if sqlite_files and not os.path.exists(PAIR_CODE_FILE):
-    st.success("🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!**")
+if active_session_files and not os.path.exists(PAIR_CODE_FILE):
+    st.success(f"🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!** (`{SESSION_NAME}`)")
     st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب ($فحص ، $انفو ، $اوامر).")
 else:
     st.subheader("🔑 ربط الواتساب بـ رمز الهاتف (Pairing Code)")
+    st.caption(f"الجلسة الحالية: `{SESSION_NAME}`")
     
     if os.path.exists(PAIR_CODE_FILE):
         with open(PAIR_CODE_FILE, "r") as f:
@@ -262,6 +287,6 @@ else:
             4. اكتب الرمز المكتوب في الصندوق أعلاه.
             """)
     else:
-        st.warning("⏳ جاري طلب رمز الربط من السيرفر... انتظر 5 ثوانٍ واضغط زر التحديث.")
+        st.warning("⏳ جاري طلب رمز الربط من السيرفر... انتظر 6 ثوانٍ واضغط زر التحديث.")
         if st.button("🔄 تحديث الصفحة لرؤية الرمز"):
             st.rerun()
