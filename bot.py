@@ -18,9 +18,9 @@ st.set_page_config(page_title="TOKYO Work System", page_icon="👑", layout="cen
 st.title("👑 TOKYO Work System - WhatsApp Bot")
 
 PAIR_CODE_FILE = "pair_code.txt"
+LINKED_FLAG_FILE = "linked.flag"
 VERSION_FILE = "session_version.txt"
 
-# جلب أو إنشاء رقم إصدار الجلسة الحالي
 def get_session_name():
     if not os.path.exists(VERSION_FILE):
         with open(VERSION_FILE, "w") as f:
@@ -33,13 +33,12 @@ def get_session_name():
 SESSION_NAME = get_session_name()
 
 # ---------------------------------------------------------
-# زر التحكم الجانبي لإعادة الضبط وتغيير الجلسة فوراً
+# زر التحكم الجانبي لإعادة الضبط وبدء جلسة جديدة
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ لوحة التحكم")
-    st.write("إذا سجلت خروج أو واجهت مشكلة بالربط، اضغط الزر أدناه للبدء بجلسة جديدة تماماً:")
+    st.write("إذا سجلت خروج أو أردت ربط حساب جديد، اضغط الزر أدناه:")
     if st.button("🔴 إعادة ضبط وبدء جلسة جديدة"):
-        # زيادة رقم الإصدار للانتقال لجلسة جديدة نظيفة
         current_ver = 1
         if os.path.exists(VERSION_FILE):
             try:
@@ -52,14 +51,15 @@ with st.sidebar:
         with open(VERSION_FILE, "w") as f:
             f.write(str(new_ver))
         
-        if os.path.exists(PAIR_CODE_FILE):
-            try:
-                os.remove(PAIR_CODE_FILE)
-            except Exception:
-                pass
+        for f in [PAIR_CODE_FILE, LINKED_FLAG_FILE]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
                 
         st.cache_resource.clear()
-        st.success(f"تم إنشاء جلسة جديدة (v{new_ver})! جاري إعادة التشغيل...")
+        st.success(f"تم بدء جلسة جديدة (v{new_ver})! جاري إعادة التشغيل...")
         time.sleep(2)
         st.rerun()
 
@@ -187,6 +187,9 @@ def start_bot_singleton(sess_name):
 
     @client.event(ConnectedEv)
     def on_connected(_: NewClient, __: ConnectedEv):
+        # يكتب هذا الملف فقط إذا اكتمل الربط بنجاح بالواتساب
+        with open(LINKED_FLAG_FILE, "w") as f:
+            f.write("true")
         print(f"\n🟢 تم الاتصال بنجاح بالجلسة {sess_name}! البوت أونلاين الآن.")
 
     @client.event(MessageEv)
@@ -229,8 +232,7 @@ def start_bot_singleton(sess_name):
 
     def pairing_worker():
         time.sleep(6)
-        session_files = [f for f in glob.glob(f"{sess_name}*") if not f.endswith(".txt")]
-        if not session_files:
+        if not os.path.exists(LINKED_FLAG_FILE):
             phone = os.getenv("PHONE_NUMBER", "").replace("+", "").replace(" ", "").replace("-", "")
             if phone:
                 for attempt in range(5):
@@ -262,9 +264,7 @@ start_bot_singleton(SESSION_NAME)
 # ---------------------------------------------------------
 # 4. الشاشة الرئيسية
 # ---------------------------------------------------------
-active_session_files = [f for f in glob.glob(f"{SESSION_NAME}*") if not f.endswith(".txt")]
-
-if active_session_files and not os.path.exists(PAIR_CODE_FILE):
+if os.path.exists(LINKED_FLAG_FILE):
     st.success(f"🟢 **البوت مرتبط ومشغّل أونلاين بنجاح!** (`{SESSION_NAME}`)")
     st.info("⚡ البوت جاهز ويستقبل الأوامر حالياً في الواتساب ($فحص ، $انفو ، $اوامر).")
 else:
